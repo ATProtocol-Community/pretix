@@ -32,6 +32,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     mkdir /data && \
     useradd -ms /bin/bash -d /pretix -u 15371 pretixuser && \
     chmod 0755 /pretix && \
+    chown pretixuser:pretixuser /etc/pretix && \
     echo 'pretixuser ALL=(ALL) NOPASSWD:SETENV: /usr/bin/supervisord' >> /etc/sudoers && \
     mkdir /static && \
     mkdir /etc/supervisord

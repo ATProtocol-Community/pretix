@@ -1,0 +1,132 @@
+# pretix for tickets.atmosphereconf.org — Dokploy (Docker Compose) stack
+#
+# Deployed by the Dokploy project "atmosphereconf pretix" from branch `cic` of
+# github.com/ATProtocol-Community/pretix. Dokploy does NOT build pretix; the
+# image is built and published to GHCR by .github/workflows/build-publish.yaml.
+#
+# Conventions required by Dokploy: no container_name, `expose` instead of
+# `ports` for anything Traefik routes to, and `dokploy-network` declared
+# external. Domains/Traefik labels are managed in the Dokploy UI (Domains tab),
+# not here.
+#
+# Set all of these in Dokploy -> compose service -> Environment:
+#
+#   PRETIX_IMAGE_TAG            cic (moving) or cic-<12char-sha> (pinned)
+#   PRETIX_URL                  https://tickets.atmosphereconf.org
+#   PRETIX_INSTANCE_NAME        ATmosphere Conference
+#   PRETIX_CURRENCY             CAD
+#   PRETIX_SECRET               Django SECRET_KEY (openssl rand -hex 32)
+#   PRETIX_DATABASE_PASSWORD    same value as POSTGRES_PASSWORD
+#   PRETIX_MAIL_FROM            tickets@atmosphereconf.org
+#   PRETIX_MAIL_HOST            smtp.forwardemail.net
+#   PRETIX_MAIL_PORT            465
+#   PRETIX_MAIL_SSL             on
+#   PRETIX_MAIL_USER            <Forward Email alias user>
+#   PRETIX_MAIL_PASSWORD        <Forward Email alias password>
+#   PRETIX_REDIS_PASSWORD       openssl rand -hex 24
+#   POSTGRES_PASSWORD           same as PRETIX_DATABASE_PASSWORD
+#   POSTGRES_USER               pretix
+#   POSTGRES_DB                 pretix
+
+services:
+  pretix:
+    image: ghcr.io/atprotocol-community/pretix:${PRETIX_IMAGE_TAG:-cic}
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      PRETIX_CONFIG_FROM_ENV: "yes"
+      AUTOMIGRATE: "yes"
+      PRETIX_URL: ${PRETIX_URL}
+      PRETIX_INSTANCE_NAME: ${PRETIX_INSTANCE_NAME:-pretix}
+      PRETIX_CURRENCY: ${PRETIX_CURRENCY:-CAD}
+      PRETIX_SECRET: ${PRETIX_SECRET}
+      PRETIX_DATABASE_NAME: ${POSTGRES_DB:-pretix}
+      PRETIX_DATABASE_USER: ${POSTGRES_USER:-pretix}
+      PRETIX_DATABASE_PASSWORD: ${PRETIX_DATABASE_PASSWORD}
+      PRETIX_DATABASE_HOST: db
+      PRETIX_DATABASE_PORT: "5432"
+      PRETIX_MAIL_FROM: ${PRETIX_MAIL_FROM}
+      PRETIX_MAIL_HOST: ${PRETIX_MAIL_HOST}
+      PRETIX_MAIL_PORT: ${PRETIX_MAIL_PORT:-465}
+      PRETIX_MAIL_SSL: ${PRETIX_MAIL_SSL:-on}
+      PRETIX_MAIL_USER: ${PRETIX_MAIL_USER}
+      PRETIX_MAIL_PASSWORD: ${PRETIX_MAIL_PASSWORD}
+      PRETIX_REDIS_HOST: redis
+      PRETIX_REDIS_PASSWORD: ${PRETIX_REDIS_PASSWORD}
+    volumes:
+      - pretix-data:/data
+    sysctls:
+      net.core.somaxconn: "4096"
+    networks:
+      - internal
+      - dokploy-network
+    depends_on:
+      - db
+      - redis
+
+  # pretix wants `pretix cron` (runperiodic) on a short interval; Dokploy has no
+  # in-container cron for compose services, so run it as a loop here. The
+  # entrypoint is overridden because the image's ENTRYPOINT is the pretix
+  # wrapper script itself.
+  cron:
+    image: ghcr.io/atprotocol-community/pretix:${PRETIX_IMAGE_TAG:-cic}
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["while true; do sleep 60; /usr/local/bin/pretix cron; done"]
+    environment:
+      PRETIX_CONFIG_FROM_ENV: "yes"
+      PRETIX_URL: ${PRETIX_URL}
+      PRETIX_INSTANCE_NAME: ${PRETIX_INSTANCE_NAME:-pretix}
+      PRETIX_CURRENCY: ${PRETIX_CURRENCY:-CAD}
+      PRETIX_SECRET: ${PRETIX_SECRET}
+      PRETIX_DATABASE_NAME: ${POSTGRES_DB:-pretix}
+      PRETIX_DATABASE_USER: ${POSTGRES_USER:-pretix}
+      PRETIX_DATABASE_PASSWORD: ${PRETIX_DATABASE_PASSWORD}
+      PRETIX_DATABASE_HOST: db
+      PRETIX_DATABASE_PORT: "5432"
+      PRETIX_MAIL_FROM: ${PRETIX_MAIL_FROM}
+      PRETIX_MAIL_HOST: ${PRETIX_MAIL_HOST}
+      PRETIX_MAIL_PORT: ${PRETIX_MAIL_PORT:-465}
+      PRETIX_MAIL_SSL: ${PRETIX_MAIL_SSL:-on}
+      PRETIX_MAIL_USER: ${PRETIX_MAIL_USER}
+      PRETIX_MAIL_PASSWORD: ${PRETIX_MAIL_PASSWORD}
+      PRETIX_REDIS_HOST: redis
+      PRETIX_REDIS_PASSWORD: ${PRETIX_REDIS_PASSWORD}
+    volumes:
+      - pretix-data:/data
+    networks:
+      - internal
+    depends_on:
+      - pretix
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pretix}
+      POSTGRES_USER: ${POSTGRES_USER:-pretix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pretix-db:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${PRETIX_REDIS_PASSWORD}"]
+    volumes:
+      - pretix-redis:/data
+    networks:
+      - internal
+
+volumes:
+  pretix-data:
+  pretix-db:
+  pretix-redis:
+
+networks:
+  internal:
+  dokploy-network:
+    external: true
