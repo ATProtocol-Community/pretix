@@ -66,3 +66,21 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Deploy only after the image is in the registry: Dokploy's own GitHub
+      # push webhook would fire before the build finishes and pull the previous
+      # :cic image. Repo secret DOKPLOY_DEPLOY_WEBHOOK is the compose deploy
+      # webhook (https://console.atproto.software/api/deploy/compose/<token>).
+      - name: Trigger Dokploy deployment
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}
+        run: |
+          if [ -z "$DEPLOY_WEBHOOK" ]; then
+            echo "DOKPLOY_DEPLOY_WEBHOOK is not set; skipping deploy"
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Event: push' \
+            -d "{\"ref\":\"${GITHUB_REF}\",\"repository\":{\"full_name\":\"${GITHUB_REPOSITORY}\"}}"
